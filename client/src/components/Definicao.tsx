@@ -4,6 +4,7 @@ import { Plus, Trash2, Pencil, Eraser } from "lucide-react";
 interface Variavel {
     motor: string;
     tipo: string;
+    constante: number;
 }
 
 interface Restricao {
@@ -34,7 +35,7 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
     const restricoesListRef = useRef<HTMLUListElement>(null);
 
     const handleAdicionarVariavel = () => {
-        setVariaveis((old) => [...old, { motor: "", tipo: "" }]);
+        setVariaveis((old) => [...old, { motor: "", tipo: "", constante: 1 }]);
 
         setRestricoes((oldRestricoes) =>
             oldRestricoes.map((r) => ({
@@ -209,6 +210,21 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                                             </option>
                                         ))}
                                     </select>
+                                    <input
+                                        type="number"
+                                        className="p-1.5 rounded bg-white shadow-sm w-20"
+                                        value={
+                                            isNaN(variavel.constante)
+                                                ? ""
+                                                : variavel.constante
+                                        }
+                                        onChange={(e) => {
+                                            const updated = [...variaveis];
+                                            updated[index].constante =
+                                                e.target.valueAsNumber ?? 1;
+                                            setVariaveis(updated);
+                                        }}
+                                    />
                                 </li>
                             ))}
                         </ul>
