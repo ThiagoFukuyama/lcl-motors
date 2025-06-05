@@ -37,6 +37,9 @@ function() {
   list(status = "API de Programação Linear funcionando!")
 }
 
+# --- Rotas para Requisição de Dados ---
+# --------------------------------------
+
 #* Listar todos os dados do modelo
 #* Retorna todos os dados atualmente carregados no banco de dados para o modelo de PL.
 #* @get /modelo_dados
@@ -51,7 +54,26 @@ function() {
   )
 }
 
+#* Listar os Modelos
+#* Retorna o nome e id dos modelos
+#* @get /modelos
+function() {
+  list(
+    modelos = dbReadTable(con, "Modelos")
+  )
+}
+
+#* Listar os Modos de Produção
+#* Retorna o nome e id dos modos
+#* @get /modos_producao
+function() {
+  list(
+    modelos = dbReadTable(con, "ModosProducao")
+  )
+}
+
 # --- Rotas de Adição de Dados (CRUD) ---
+# ---------------------------------------
 
 #* Adicionar modelo
 #* Adiciona um novo tipo de modelo (ex: 'Motor XYZ').
@@ -118,10 +140,60 @@ function(modelo_id, modo_id, recurso_id, consumo_unitario) {
 
 # --- Rota Principal: Resolver o problema de Programação Linear ---
 
-#* Resolve o problema de programação linear
+#* Resolve um problema de PL via JSON
+#* Essa é a rota principal a ser chamada
+#* @post /solucionar
+#* @json
+function(req) {
+  body <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  
+  tipo_objetivo <- tolower(body$tipo_objetivo)
+  if (!(tipo_objetivo %in% c("min", "max"))) {
+    stop("O tipo de objetivo deve ser 'min' ou 'max'")
+  }
+  
+  variaveis <- body$variaveis
+  restricoes <- body$restricoes
+  
+  f.obj <- sapply(variaveis, function(v) v$constante)
+  f.con <- do.call(rbind, lapply(restricoes, function(r) r$coeficientes))
+  f.dir <- sapply(restricoes, function(r) r$operador)
+  f.rhs <- sapply(restricoes, function(r) r$valor)
+  
+  sol <- lpSolve::lp(
+    direction = tipo_objetivo,
+    objective.in = f.obj,
+    const.mat = f.con,
+    const.dir = f.dir,
+    const.rhs = f.rhs
+  )
+  
+  if (sol$status == 0) {
+    nomes_vars <- sapply(variaveis, function(v) v$motor)
+    list(
+      status = "Sucesso",
+      tipo_objetivo = tipo_objetivo,
+      valor_objetivo = sol$objval,
+      variaveis = setNames(as.numeric(sol$solution), nomes_vars)
+    )
+  } else if (sol$status == 2) {
+    list(
+      status = "Falha: problema inviável",
+      mensagem = "Não há solução que satisfaça todas as restrições"
+    )
+  } else {
+    list(
+      status = paste("Erro (status:", sol$status, ")"),
+      mensagem = "Erro ao resolver o problema. Consulte documentação do lpSolve."
+    )
+  }
+}
+
+
+#* Resolve o problema de programação linear teste
 #* Este endpoint calcula a produção ideal de cada modelo/modo de produção para minimizar o custo total,
 #* respeitando as restrições de recursos e atendendo às demandas (MAIOR OU IGUAL).
-#* @get /resolver
+#* @get /resolver_teste
 function() {
   # 1. Carregar dados do banco de dados (garantindo a ordem para consistência)
   modelos <- dbGetQuery(con, "SELECT id, nome FROM Modelos ORDER BY id")
