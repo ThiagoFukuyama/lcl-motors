@@ -1,9 +1,7 @@
+import type { Resultado } from "../pages/Problema";
+
 type ResultadoProps = {
-    resultado: {
-        variaveis: { nome: string; valor: number }[];
-        valorZ: number;
-        imagemUrl: string;
-    };
+    resultado: Resultado;
     onVoltar: () => void;
 };
 
@@ -26,12 +24,12 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                 </div>
 
                 <div className="flex flex-wrap gap-4 mb-10 justify-center">
-                    {resultado.variaveis.map(({ nome, valor }) => (
+                    {resultado.variaveis.map((valor, i) => (
                         <div
-                            key={nome}
+                            key={i}
                             className="border border-gray-300 bg-gray-100 text-gray-800 rounded-lg min-w-[70px] text-center p-3 font-semibold shadow-sm"
                         >
-                            <div className="text-sm mb-1">{nome}</div>
+                            <div className="text-sm mb-1">{`X${i + 1}`}</div>
                             <div className="text-lg">{valor}</div>
                         </div>
                     ))}
@@ -39,12 +37,14 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
 
                 <div className="text-center mb-12 text-4xl font-extrabold text-gray-900">
                     Z ={" "}
-                    <span className="text-[#8B0000]">{resultado.valorZ}</span>
+                    <span className="text-[#8B0000]">
+                        {resultado.valor_objetivo[0]}
+                    </span>
                 </div>
 
                 <div className="flex justify-center">
                     <img
-                        src={resultado.imagemUrl}
+                        src={""}
                         alt="Gráfico do resultado"
                         className="max-w-full max-h-64 rounded-lg shadow-lg"
                     />

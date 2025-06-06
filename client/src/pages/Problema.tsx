@@ -2,22 +2,34 @@ import { useState } from "react";
 import Definicao from "../components/Definicao";
 import Resultado from "../components/Resultado";
 
+export interface Variavel {
+    motor: string;
+    tipo: string;
+    constante: number;
+}
+
+export interface Restricao {
+    id: string;
+    titulo: string;
+    coeficientes: number[];
+    operador: "<=" | ">=" | "=";
+    valor: number;
+}
+
+export interface Resultado {
+    status: string[];
+    tipo_objetivo: string[];
+    valor_objetivo: number[];
+    variaveis: number[];
+}
+
 export default function Problema() {
-    const [resultado, setResultado] = useState<any | null>(null);
+    const [variaveis, setVariaveis] = useState<Variavel[]>([]);
+    const [restricoes, setRestricoes] = useState<Restricao[]>([]);
+    const [resultado, setResultado] = useState<Resultado | null>(null);
 
-    const handleResolver = async (dadosDoProblema: any) => {
-        const resultadoFake = {
-            variaveis: [
-                { nome: "x1", valor: 5 },
-                { nome: "x2", valor: 12 },
-                { nome: "x3", valor: 7 },
-            ],
-            valorZ: 42,
-            imagemUrl:
-                "https://via.placeholder.com/300x200?text=Gr%C3%A1fico+Exemplo",
-        };
-
-        setResultado(resultadoFake);
+    const handleResolver = async (resultado: Resultado) => {
+        setResultado(resultado);
     };
 
     const handleVoltar = () => {
@@ -29,7 +41,13 @@ export default function Problema() {
             {resultado ? (
                 <Resultado resultado={resultado} onVoltar={handleVoltar} />
             ) : (
-                <Definicao onResolver={handleResolver} />
+                <Definicao
+                    variaveis={variaveis}
+                    setVariaveis={setVariaveis}
+                    restricoes={restricoes}
+                    setRestricoes={setRestricoes}
+                    onResolver={handleResolver}
+                />
             )}
         </>
     );

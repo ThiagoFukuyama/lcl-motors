@@ -1,35 +1,64 @@
-import { useState, useRef, useEffect } from "react";
+import {
+    useState,
+    useRef,
+    useEffect,
+    type SetStateAction,
+    type Dispatch,
+} from "react";
 import { Plus, Trash2, Pencil, Eraser } from "lucide-react";
+import type { Restricao, Resultado, Variavel } from "../pages/Problema";
 
-interface Variavel {
-    motor: string;
-    tipo: string;
-    constante: number;
+interface Modelo {
+    id: number;
+    nome: string;
 }
 
-interface Restricao {
-    id: string;
-    titulo: string;
-    coeficientes: number[];
-    operador: "<=" | ">=" | "=";
-    valor: number;
+interface ModoProducao {
+    id: number;
+    nome: string;
 }
 
 interface DefinicaoProps {
-    onResolver: (dados: {
-        variaveis: Variavel[];
-        restricoes: Restricao[];
-    }) => void;
+    variaveis: Variavel[];
+    setVariaveis: Dispatch<SetStateAction<Variavel[]>>;
+    restricoes: Restricao[];
+    setRestricoes: Dispatch<SetStateAction<Restricao[]>>;
+    onResolver: (resultado: Resultado) => void;
 }
 
-const motores = ["", "Motor 1", "Motor 2", "Motor 3"];
-const tipos = ["", "Interno", "Externo"];
-
-export default function Definicao({ onResolver }: DefinicaoProps) {
-    const [variaveis, setVariaveis] = useState<Variavel[]>([]);
-    const [restricoes, setRestricoes] = useState<Restricao[]>([]);
+export default function Definicao({
+    variaveis,
+    setVariaveis,
+    restricoes,
+    setRestricoes,
+    onResolver,
+}: DefinicaoProps) {
     const [restricaoSelecionada, setRestricaoSelecionada] =
         useState<Restricao | null>(null);
+
+    const [modelos, setModelos] = useState<Modelo[]>([]);
+    const [modosProducao, setModosProducao] = useState<ModoProducao[]>([]);
+
+    useEffect(() => {
+        const fetchDados = async () => {
+            try {
+                const [resModelos, resModos] = await Promise.all([
+                    fetch("/api/modelos"),
+                    fetch("/api/modos_producao"),
+                ]);
+
+                const dataModelos = await resModelos.json();
+                const dataModos = await resModos.json();
+
+                setModelos(dataModelos.modelos || []);
+                setModosProducao(dataModos.modelos || []);
+            } catch (error) {
+                console.error("Erro ao buscar dados dos selects:", error);
+            }
+        };
+
+        fetchDados();
+    }, []);
 
     const variaveisListRef = useRef<HTMLUListElement>(null);
     const restricoesListRef = useRef<HTMLUListElement>(null);
@@ -116,9 +145,33 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
     const podeResolver =
         variaveis.length > 0 && restricoes.length > 0 && !variaveisInvalidas;
 
-    const handleClickResolver = () => {
+    const handleClickResolver = async () => {
         if (!podeResolver) return;
-        onResolver({ variaveis, restricoes });
+
+        try {
+            const response = await fetch("api/solucionar", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    tipo_objetivo: "min",
+                    variaveis,
+                    restricoes,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Erro na requisição: ${response.statusText}`);
+            }
+
+            const resultado = await response.json();
+
+            onResolver(resultado);
+        } catch (error) {
+            console.error("Erro ao resolver:", error);
+            alert("Erro ao resolver o problema, veja o console.");
+        }
     };
 
     return (
@@ -184,11 +237,15 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                                             setVariaveis(updated);
                                         }}
                                     >
-                                        {motores.map((motor, i) => (
-                                            <option key={i} value={motor}>
-                                                {motor === ""
-                                                    ? "-- Selecione motor --"
-                                                    : motor}
+                                        <option value="">
+                                            -- Selecione motor --
+                                        </option>
+                                        {modelos.map((modelo) => (
+                                            <option
+                                                key={modelo.id}
+                                                value={modelo.nome}
+                                            >
+                                                {modelo.nome}
                                             </option>
                                         ))}
                                     </select>
@@ -202,14 +259,19 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                                             setVariaveis(updated);
                                         }}
                                     >
-                                        {tipos.map((tipo, i) => (
-                                            <option key={i} value={tipo}>
-                                                {tipo === ""
-                                                    ? "-- Selecione tipo --"
-                                                    : tipo}
+                                        <option value="">
+                                            -- Selecione tipo --
+                                        </option>
+                                        {modosProducao.map((modo) => (
+                                            <option
+                                                key={modo.id}
+                                                value={modo.nome}
+                                            >
+                                                {modo.nome}
                                             </option>
                                         ))}
                                     </select>
+
                                     <input
                                         type="number"
                                         className="p-1.5 rounded bg-white shadow-sm w-20"
