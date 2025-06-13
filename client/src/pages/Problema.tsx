@@ -1,35 +1,40 @@
+// client/src/pages/Problema.tsx
 import { useState } from "react";
 import Definicao from "../components/Definicao";
 import Resultado from "../components/Resultado";
 
-export interface Variavel {
-    motor: string;
-    tipo: string;
-    constante: number;
+// Interfaces para os dados que o frontend vai gerenciar e enviar
+export interface DemandaInput {
+    modelo_id: number;
+    quantidade: number;
 }
 
-export interface Restricao {
-    id: string;
-    titulo: string;
-    coeficientes: number[];
-    operador: "<=" | ">=" | "=";
-    valor: number;
+export interface CapacidadeInput {
+    recurso_id: number;
+    capacidade: number;
 }
 
-export interface Resultado {
-    status: string[];
-    tipo_objetivo: string[];
-    valor_objetivo: number[];
-    variaveis: number[];
+// Interface para o resultado da PL retornado pelo backend (ATUALIZADA)
+export interface ResultadoPL {
+    status: string[]; // Continua como array (ex: ["Sucesso"])
+    valor_objetivo: number[]; // Continua como array de 1 elemento
+    quantidades_produzidas: { [key: string]: number[] }; // Objeto nomeado com valores que são arrays de 1 número
+    mensagem?: string; // Para mensagens de erro ou inviabilidade
+    // --- NOVAS PROPRIEDADES ADICIONADAS ---
+    modelos_data: { id: number; nome: string }[];
+    modos_producao_data: { id: number; nome: string }[];
+    recursos_data: { id: number; nome: string; capacidade: number }[];
+    consumo_recursos_data: { modelo_id: number; modo_id: number; recurso_id: number; consumo_unitario: number }[];
+    demandas_input: DemandaInput[]; // Demandas que o usuário inseriu
+    // --- FIM DAS NOVAS PROPRIEDADES ---
 }
+
 
 export default function Problema() {
-    const [variaveis, setVariaveis] = useState<Variavel[]>([]);
-    const [restricoes, setRestricoes] = useState<Restricao[]>([]);
-    const [resultado, setResultado] = useState<Resultado | null>(null);
+    const [resultado, setResultado] = useState<ResultadoPL | null>(null);
 
-    const handleResolver = async (resultado: Resultado) => {
-        setResultado(resultado);
+    const handleResolver = async (res: ResultadoPL) => {
+        setResultado(res);
     };
 
     const handleVoltar = () => {
@@ -42,10 +47,6 @@ export default function Problema() {
                 <Resultado resultado={resultado} onVoltar={handleVoltar} />
             ) : (
                 <Definicao
-                    variaveis={variaveis}
-                    setVariaveis={setVariaveis}
-                    restricoes={restricoes}
-                    setRestricoes={setRestricoes}
                     onResolver={handleResolver}
                 />
             )}
