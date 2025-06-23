@@ -1,6 +1,10 @@
 // client/src/components/Definicao.tsx
 import { useState, useEffect } from "react";
-import type { DemandaInput, CapacidadeInput, ResultadoPL } from "../pages/Problema";
+import type {
+    DemandaInput,
+    CapacidadeInput,
+    ResultadoPL,
+} from "../pages/Problema";
 import { Eraser } from "lucide-react";
 
 interface Modelo {
@@ -25,7 +29,6 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
     const [capacidades, setCapacidades] = useState<CapacidadeInput[]>([]);
     const [tipoObjetivo, setTipoObjetivo] = useState<"min" | "max">("min");
 
-
     // Carrega modelos e recursos do backend ao iniciar o componente
     useEffect(() => {
         const fetchDadosIniciais = async () => {
@@ -45,21 +48,26 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                 setRecursos(fetchedRecursos);
 
                 // Inicializa as demandas com base nos modelos carregados
-                const initialDemandas: DemandaInput[] = fetchedModelos.map(m => ({
-                    modelo_id: m.id,
-                    quantidade: 0, // Valor inicial da demanda
-                }));
+                const initialDemandas: DemandaInput[] = fetchedModelos.map(
+                    (m) => ({
+                        modelo_id: m.id,
+                        quantidade: 0, // Valor inicial da demanda
+                    })
+                );
                 setDemandas(initialDemandas);
 
                 // Inicializa as capacidades com base nos recursos carregados
-                const initialCapacidades: CapacidadeInput[] = fetchedRecursos.map(r => ({
-                    recurso_id: r.id,
-                    capacidade: r.capacidade, // Usa a capacidade padrão do DB
-                }));
+                const initialCapacidades: CapacidadeInput[] =
+                    fetchedRecursos.map((r) => ({
+                        recurso_id: r.id,
+                        capacidade: r.capacidade, // Usa a capacidade padrão do DB
+                    }));
                 setCapacidades(initialCapacidades);
-
             } catch (error) {
-                console.error("Erro ao buscar dados iniciais (modelos/recursos):", error);
+                console.error(
+                    "Erro ao buscar dados iniciais (modelos/recursos):",
+                    error
+                );
             }
         };
 
@@ -67,25 +75,35 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
     }, []);
 
     const handleDemandaChange = (modeloId: number, quantidade: number) => {
-        setDemandas(prev =>
-            prev.map(d => (d.modelo_id === modeloId ? { ...d, quantidade } : d))
+        setDemandas((prev) =>
+            prev.map((d) =>
+                d.modelo_id === modeloId ? { ...d, quantidade } : d
+            )
         );
     };
 
     const handleCapacidadeChange = (recursoId: number, capacidade: number) => {
-        setCapacidades(prev =>
-            prev.map(c => (c.recurso_id === recursoId ? { ...c, capacidade } : c))
+        setCapacidades((prev) =>
+            prev.map((c) =>
+                c.recurso_id === recursoId ? { ...c, capacidade } : c
+            )
         );
     };
 
     const handleLimpar = () => {
         // Reinicializa as demandas e capacidades para seus estados originais
-        setDemandas(modelos.map(m => ({ modelo_id: m.id, quantidade: 0 })));
-        setCapacidades(recursos.map(r => ({ recurso_id: r.id, capacidade: r.capacidade })));
+        setDemandas(modelos.map((m) => ({ modelo_id: m.id, quantidade: 0 })));
+        setCapacidades(
+            recursos.map((r) => ({
+                recurso_id: r.id,
+                capacidade: r.capacidade,
+            }))
+        );
         setTipoObjetivo("min");
     };
 
-    const podeResolver = demandas.length > 0 && demandas.every(d => d.quantidade >= 0);
+    const podeResolver =
+        demandas.length > 0 && demandas.every((d) => d.quantidade >= 0);
 
     const handleClickResolver = async () => {
         if (!podeResolver) return;
@@ -107,19 +125,26 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.mensagem || `Erro na requisição: ${response.statusText}`);
+                throw new Error(
+                    errorData.mensagem ||
+                        `Erro na requisição: ${response.statusText}`
+                );
             }
 
             const resultado = await response.json();
             onResolver(resultado);
         } catch (error: any) {
             console.error("Erro ao resolver:", error);
-            alert(`Erro ao resolver o problema: ${error.message || "Verifique o console."}`);
+            alert(
+                `Erro ao resolver o problema: ${
+                    error.message || "Verifique o console."
+                }`
+            );
         }
     };
 
     return (
-        <div className="min-h-screen bg-white py-10">
+        <div className="min-h-screen py-10 bg-motors">
             <div className="max-w-4xl mx-auto px-4 flex flex-col h-full">
                 <div className="flex justify-between items-center mb-6">
                     <h1 className="text-2xl font-bold text-[#8B0000]">
@@ -135,21 +160,33 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                 </div>
 
                 {/* Seção de Demandas */}
-                <div className="border rounded-xl p-4 shadow-md bg-gray-50 mb-6">
+                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border-1 border-gray-300">
                     <h2 className="text-lg font-semibold text-gray-700 mb-3">
                         Demandas de Modelos (unidades)
                     </h2>
                     <div className="space-y-3">
-                        {modelos.map(modelo => (
-                            <div key={modelo.id} className="flex items-center gap-4">
+                        {modelos.map((modelo) => (
+                            <div
+                                key={modelo.id}
+                                className="flex items-center gap-4"
+                            >
                                 <label className="w-24 text-gray-700 font-medium">
                                     {modelo.nome}:
                                 </label>
                                 <input
                                     type="number"
                                     min="0"
-                                    value={demandas.find(d => d.modelo_id === modelo.id)?.quantidade || ''}
-                                    onChange={(e) => handleDemandaChange(modelo.id, Number(e.target.value))}
+                                    value={
+                                        demandas.find(
+                                            (d) => d.modelo_id === modelo.id
+                                        )?.quantidade || ""
+                                    }
+                                    onChange={(e) =>
+                                        handleDemandaChange(
+                                            modelo.id,
+                                            Number(e.target.value)
+                                        )
+                                    }
                                     className="p-2 rounded border shadow-sm flex-1 w-full"
                                     placeholder="Quantidade demandada"
                                 />
@@ -159,21 +196,33 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                 </div>
 
                 {/* Seção de Capacidades de Recursos */}
-                <div className="border rounded-xl p-4 shadow-md bg-gray-50 mb-6">
+                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border-1 border-gray-300">
                     <h2 className="text-lg font-semibold text-gray-700 mb-3">
                         Capacidades de Recursos (horas)
                     </h2>
                     <div className="space-y-3">
-                        {recursos.map(recurso => (
-                            <div key={recurso.id} className="flex items-center gap-4">
+                        {recursos.map((recurso) => (
+                            <div
+                                key={recurso.id}
+                                className="flex items-center gap-4"
+                            >
                                 <label className="w-24 text-gray-700 font-medium">
                                     {recurso.nome}:
                                 </label>
                                 <input
                                     type="number"
                                     min="0"
-                                    value={capacidades.find(c => c.recurso_id === recurso.id)?.capacidade || ''}
-                                    onChange={(e) => handleCapacidadeChange(recurso.id, Number(e.target.value))}
+                                    value={
+                                        capacidades.find(
+                                            (c) => c.recurso_id === recurso.id
+                                        )?.capacidade || ""
+                                    }
+                                    onChange={(e) =>
+                                        handleCapacidadeChange(
+                                            recurso.id,
+                                            Number(e.target.value)
+                                        )
+                                    }
                                     className="p-2 rounded border shadow-sm flex-1 w-full"
                                     placeholder="Capacidade disponível"
                                 />
@@ -183,20 +232,21 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                 </div>
 
                 {/* Tipo de Objetivo */}
-                <div className="border rounded-xl p-4 shadow-md bg-gray-50 mb-6">
+                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border-1 border-gray-300">
                     <h2 className="text-lg font-semibold text-gray-700 mb-3">
                         Tipo de Objetivo
                     </h2>
                     <select
                         value={tipoObjetivo}
-                        onChange={(e) => setTipoObjetivo(e.target.value as "min" | "max")}
+                        onChange={(e) =>
+                            setTipoObjetivo(e.target.value as "min" | "max")
+                        }
                         className="p-2 rounded border shadow-sm w-full cursor-pointer"
                     >
                         <option value="min">Minimizar Custo Total</option>
-                        {/* <option value="max">Maximizar Lucro</option>  Descomente se for implementar lucro futuramente */}
+                        {/* <option value="max">Maximizar Lucro</option> */}
                     </select>
                 </div>
-
 
                 <div className="flex justify-center mt-6">
                     <button
