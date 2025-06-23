@@ -7,14 +7,14 @@ library(dplyr)
 library(lpSolve)
 
 # Conecta ao banco de dados SQLite
-# CERTIFIQUE-SE DE QUE "motorsdb.db" FOI CRIADO USANDO O SCRIPT schema_lcl.sql
+# CERTIFIQUE-SE DE QUE "motorsdb.db" FOI CRIADO USANDO O SCRIPT motorsdb.sql
 # E ESTEJA NO MESMO DIRETÓRIO DO api.R
 con <- dbConnect(RSQLite::SQLite(), "motorsdb.db")
 
 # Função para criar as tabelas se não existirem (garante a estrutura em caso de execução sem o script SQL externo)
 # É uma boa prática tê-la, mas a ideia é que o schema_lcl.sql seja executado primeiro.
 create_tables <- function(con) {
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS Modelos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL)")
+  dbExecute(con, "CREATE TABLE IF NOT EXISTS Modelos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, demanda_terceirizada_minima INTEGER DEFAULT 0)")
   dbExecute(con, "CREATE TABLE IF NOT EXISTS ModosProducao (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL)")
   dbExecute(con, "CREATE TABLE IF NOT EXISTS Recursos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, capacidade REAL NOT NULL)")
   dbExecute(con, "CREATE TABLE IF NOT EXISTS Demandas (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, quantidade INTEGER NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id))")
@@ -45,21 +45,20 @@ function() {
 #* @get /modelo_dados
 function() {
   list(
-    modelos = dbReadTable(con, "Modelos"),
+    produtos = dbReadTable(con, "Produtos"),
     modos_producao = dbReadTable(con, "ModosProducao"),
     recursos = dbReadTable(con, "Recursos"),
-    demandas = dbReadTable(con, "Demandas"),
     custos = dbReadTable(con, "Custos"),
     consumo_recursos = dbReadTable(con, "ConsumoRecursos")
   )
 }
 
-#* Listar os Modelos
-#* Retorna o nome e id dos modelos
-#* @get /modelos
+#* Listar os Produtos
+#* Retorna o nome e id dos produtos
+#* @get /produtos
 function() {
   list(
-    modelos = dbReadTable(con, "Modelos")
+    produtos = dbReadTable(con, "Produtos")
   )
 }
 
@@ -81,27 +80,182 @@ function() {
   )
 }
 
-
-# --- Rotas de Adição de Dados (CRUD) ---
+# --- Rotas de Controle de Dados (CRUD) ---
 # ---------------------------------------
 
-#* Adicionar modelo
-#* Adiciona um novo tipo de modelo (ex: 'Motor XYZ').
-#* @param nome O nome do modelo.
-#* @post /modelo
-function(nome) {
-  dbExecute(con, "INSERT INTO Modelos (nome) VALUES (?)", params = list(nome))
-  list(status = "Modelo adicionado com sucesso")
+# --- Produtos (CRUD) ---
+# -----------------------
+
+#* Adicionar produto
+#* Cria um produto com demandas, custos/lucros e consumo de recursos (modo interno).
+#* @param nome O nome do produto.
+#* @param demanda_terceirizada_minima A quantidade mínima exigida de produção terceirizada.
+#* @param demanda_minima_total A quantidade mínima total a ser produzida (todos os modos).
+#* @param custos Lista de objetos: {modo_id, custo_unitario, lucro_unitario}.
+#* @param consumos Lista de objetos: {recurso_id, consumo_unitario} (modo interno).
+#* @post /produto
+function(nome, demanda_terceirizada_minima = 0, demanda_minima_total = 0, custos = NULL, consumos = NULL) {
+  demanda_terceirizada_minima <- as.integer(demanda_terceirizada_minima)
+  demanda_minima_total <- as.integer(demanda_minima_total)
+
+  dbExecute(con,
+    "INSERT INTO Produtos (nome, demanda_terceirizada_minima, demanda_minima_total) VALUES (?, ?, ?)",
+    params = list(nome, demanda_terceirizada_minima, demanda_minima_total)
+  )
+
+  id <- dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
+
+  if (is.data.frame(custos)) {
+    custos <- split(custos, seq(nrow(custos)))
+  }
+  if (!is.null(custos)) {
+    for (custo in custos) {
+      dbExecute(con,
+        "INSERT INTO Custos (produto_id, modo_id, custo_unitario, lucro_unitario) VALUES (?, ?, ?, ?)",
+        params = list(
+          id,
+          as.integer(custo$modo_id),
+          as.numeric(custo$custo_unitario),
+          as.numeric(custo$lucro_unitario)
+        )
+      )
+    }
+  }
+
+  if (is.data.frame(consumos)) {
+    consumos <- split(consumos, seq(nrow(consumos)))
+  }
+  if (!is.null(consumos)) {
+    for (consumo in consumos) {
+      dbExecute(con,
+        "INSERT INTO ConsumoRecursos (produto_id, modo_id, recurso_id, consumo_unitario) VALUES (?, 1, ?, ?)",
+        params = list(
+          id,
+          as.integer(consumo$recurso_id),
+          as.numeric(consumo$consumo_unitario)
+        )
+      )
+    }
+  }
+
+  list(status = "Produto criado com sucesso", produto_id = id)
 }
 
-#* Adicionar modo de produção
-#* Adiciona um novo modo de produção (ex: 'Interno', 'Terceirizado', 'Expresso').
-#* @param nome O nome do modo de produção.
-#* @post /modo_producao
-function(nome) {
-  dbExecute(con, "INSERT INTO ModosProducao (nome) VALUES (?)", params = list(nome))
-  list(status = "Modo de produção adicionado com sucesso")
+#* Obter produto por ID com dados completos
+#* @serializer json
+#* @get /produto/<id:int>
+function(id) {
+  id <- as.integer(id)
+
+  # Buscar produto
+  produto <- dbGetQuery(con, "SELECT * FROM Produtos WHERE id = ?", params = list(id))
+  if (nrow(produto) == 0) {
+    return(list(error = "Produto não encontrado"))
+  }
+
+  # Buscar custos e lucros
+  custos <- dbGetQuery(con, "
+    SELECT modo_id, custo_unitario, lucro_unitario
+    FROM Custos
+    WHERE produto_id = ?", params = list(id))
+
+  # Buscar consumo interno (modo_id = 1)
+  consumos <- dbGetQuery(con, "
+    SELECT recurso_id, consumo_unitario
+    FROM ConsumoRecursos
+    WHERE produto_id = ? AND modo_id = 1", params = list(id))
+
+  # Buscar demanda
+  demanda <- dbGetQuery(con, "
+    SELECT quantidade
+    FROM Demandas
+    WHERE produto_id = ?", params = list(id))
+
+  list(
+    produto = produto[1, ],
+    custos = custos,
+    consumo_interno = consumos,
+    demanda = if (nrow(demanda) > 0) demanda$quantidade[1] else NA
+  )
 }
+
+#* Atualizar produto
+#* Atualiza dados do produto, seus custos/lucros e consumos de recursos (modo interno).
+#* @param nome Novo nome do produto.
+#* @param demanda_terceirizada_minima Nova demanda terceirizada mínima.
+#* @param demanda_minima_total Nova demanda mínima total
+#* @param custos Lista de listas com: modo_id, custo_unitario, lucro_unitario.
+#* @param consumos Lista de listas com: recurso_id, consumo_unitario. (somente para modo_id = 1)
+#* @put /produto/<id:int>
+function(id, nome, demanda_terceirizada_minima = 0, demanda_minima_total = 0, custos = NULL, consumos = NULL) {
+  id <- as.integer(id)
+  demanda_terceirizada_minima <- as.integer(demanda_terceirizada_minima)
+  demanda_minima_total <- as.integer(demanda_minima_total)
+
+  if (is.data.frame(custos)) {
+    custos <- split(custos, seq(nrow(custos)))
+  }
+
+  if (is.data.frame(consumos)) {
+    consumos <- split(consumos, seq(nrow(consumos)))
+  }
+
+  dbExecute(con, "UPDATE Produtos SET nome = ?, demanda_terceirizada_minima = ?, demanda_minima_total WHERE id = ?",
+            params = list(nome, demanda_terceirizada_minima, demanda_minima_total, id))
+
+  if (!is.null(custos)) {
+    dbExecute(con, "DELETE FROM Custos WHERE produto_id = ?", params = list(id))
+  }
+
+  for (custo in custos) {
+    dbExecute(con,
+      "INSERT INTO Custos (produto_id, modo_id, custo_unitario, lucro_unitario) VALUES (?, ?, ?, ?)",
+      params = list(
+        id,
+        as.integer(custo$modo_id),
+        as.numeric(custo$custo_unitario),
+        as.numeric(custo$lucro_unitario)
+      )
+    )
+  }
+
+  if (!is.null(consumos)) {
+    dbExecute(con, "DELETE FROM ConsumoRecursos WHERE produto_id = ? AND modo_id = 1", params = list(id)) 
+  }
+
+  for (consumo in consumos) {
+    dbExecute(con,
+      "INSERT INTO ConsumoRecursos (produto_id, modo_id, recurso_id, consumo_unitario) VALUES (?, 1, ?, ?)",
+      params = list(
+        id,
+        as.integer(consumo$recurso_id),
+        as.numeric(consumo$consumo_unitario)
+      )
+    )
+  }
+
+  list(status = "Produto e dados relacionados atualizados com sucesso")
+}
+
+#* Deletar produto
+#* Remove também registros dependentes do produto (custos, consumos, demandas).
+#* @delete /produto/<id:int>
+function(id) {
+  id <- as.integer(id)
+
+  # Remove registros dependentes
+  dbExecute(con, "DELETE FROM Custos WHERE produto_id = ?", params = list(id))
+  dbExecute(con, "DELETE FROM ConsumoRecursos WHERE produto_id = ?", params = list(id))
+  dbExecute(con, "DELETE FROM Demandas WHERE produto_id = ?", params = list(id))
+
+  # Remove o produto
+  dbExecute(con, "DELETE FROM Produtos WHERE id = ?", params = list(id))
+
+  list(status = "Produto e dados relacionados deletados com sucesso")
+}
+
+# --- Recursos (CRUD) ---
+# -----------------------
 
 #* Adicionar recurso
 #* Adiciona um novo recurso disponível (ex: 'Montagem', 'Acabamento', 'Energia').
@@ -109,46 +263,56 @@ function(nome) {
 #* @param capacidade A capacidade total disponível para este recurso.
 #* @post /recurso
 function(nome, capacidade) {
-  dbExecute(con, "INSERT INTO Recursos (nome, capacidade) VALUES (?, ?)", params = list(nome, as.numeric(capacidade)))
-  list(status = "Recurso adicionado com sucesso")
+
+  dbExecute(con, "INSERT INTO Recursos (nome, capacidade) VALUES (?, ?)", 
+  params = list(nome, as.numeric(capacidade)))
+
+  recurso_id <- dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
+
+  produtos <- dbGetQuery(con, "SELECT id FROM Produtos")
+  modos <- dbGetQuery(con, "SELECT id FROM ModosProducao")
+
+  for (produto_id in produtos$id) {
+    for (modo_id in modos$id) {
+      dbExecute(con,
+        "INSERT INTO ConsumoRecursos (produto_id, modo_id, recurso_id, consumo_unitario) VALUES (?, ?, ?, 0)",
+        params = list(produto_id, modo_id, recurso_id)
+      )
+    }
+  }
+
+  list(status = "Recurso adicionado com sucesso e consumo inicializado")
 }
 
-#* Adicionar demanda
-#* Define a demanda mínima para um modelo específico.
-#* @param modelo_id O ID do modelo.
-#* @param quantidade A quantidade demandada.
-#* @post /demanda
-function(modelo_id, quantidade) {
-  dbExecute(con, "INSERT INTO Demandas (modelo_id, quantidade) VALUES (?, ?)", params = list(as.integer(modelo_id), as.integer(quantidade)))
-  list(status = "Demanda registrada")
+#* Atualizar recurso
+#* @param nome O nome do recurso.
+#* @param capacidade A capacidade total disponível para este recurso.
+#* @put /recursos/<id:int>
+function(id, nome, capacidade) {
+
+  dbExecute(con, "UPDATE Recursos SET nome = ?, capacidade = ? WHERE id = ?", 
+  params = list(nome, as.numeric(capacidade), as.integer(id)))
+
+  list(status = "Recurso atualizado com sucesso")
 }
 
-#* Adicionar custo
-#* Define o custo unitário para produzir um modelo em um modo de produção específico.
-#* @param modelo_id O ID do modelo.
-#* @param modo_id O ID do modo de produção.
-#* @param custo_unitario O custo por unidade.
-#* @post /custo
-function(modelo_id, modo_id, custo_unitario) {
-  dbExecute(con, "INSERT INTO Custos (modelo_id, modo_id, custo_unitario) VALUES (?, ?, ?)",
-            params = list(as.integer(modelo_id), as.integer(modo_id), as.numeric(custo_unitario)))
-  list(status = "Custo registrado")
+#* Deletar recurso
+#* Remove também registros dependentes do recurso (consumos).
+#* @delete /recursos/<id:int>
+function(id) {
+  id <- as.integer(id)
+
+  # Remove registros dependentes
+  dbExecute(con, "DELETE FROM ConsumoRecursos WHERE recurso_id = ?", params = list(id))
+
+  # Remove o produto
+  dbExecute(con, "DELETE FROM Recursos WHERE id = ?", params = list(id))
+
+  list(status = "Produto e dados relacionados deletados com sucesso")
 }
 
-#* Adicionar consumo de recurso
-#* Define quanto de um recurso é consumido para produzir uma unidade de um modelo em um modo de produção específico.
-#* @param modelo_id O ID do modelo.
-#* @param modo_id O ID do modo de produção.
-#* @param recurso_id O ID do recurso.
-#* @param consumo_unitario A quantidade de recurso consumida por unidade.
-#* @post /consumo_recurso
-function(modelo_id, modo_id, recurso_id, consumo_unitario) {
-  dbExecute(con, "INSERT INTO ConsumoRecursos (modelo_id, modo_id, recurso_id, consumo_unitario) VALUES (?, ?, ?, ?)",
-            params = list(as.integer(modelo_id), as.integer(modo_id), as.integer(recurso_id), as.numeric(consumo_unitario)))
-  list(status = "Consumo de recurso registrado")
-}
-
-# --- Rota Principal: Resolver o problema de Programação Linear (Adaptada) ---
+# --- Fim das Rotas CRUD ---
+# --------------------------
 
 #* Resolve o problema de programação linear da LCL Motors com dados personalizados
 #* Este endpoint calcula a produção ideal de cada modelo/modo de produção para minimizar o custo total,
@@ -358,10 +522,135 @@ function(req) {
   }
 }
 
-# Rota original /solucionar_old comentada para evitar conflitos.
-# #* @post /solucionar_old
-# #* @json
-# # function(req) {
-# #   body <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
-# # # ... (restante do código original)
-# # }
+# --- Rota Principal: Resolver o problema de Programação Linear (Adaptada) ---
+# ----------------------------------------------------------------------------
+
+#* Resolve problema de PL com base em nomes de produtos e banco atualizado
+#* @post /resolver
+#* @json
+function(req) {
+  library(dplyr)
+  body <- jsonlite::fromJSON(req$postBody)
+  
+  tipo_objetivo <- tolower(body$tipo_objetivo)
+  nomes_produtos <- body$produtos
+  demanda_total <- as.numeric(body$demanda_total)
+
+  if (!(tipo_objetivo %in% c("min", "max"))) {
+    stop("tipo_objetivo deve ser 'min' ou 'max'")
+  }
+
+  # Consulta básica do banco
+  produtos <- dbGetQuery(con, sprintf("SELECT * FROM Produtos WHERE nome IN ('%s')", paste(nomes_produtos, collapse = "', '")))
+  if (nrow(produtos) == 0) stop("Nenhum produto encontrado.")
+
+  modos <- dbGetQuery(con, "SELECT * FROM ModosProducao ORDER BY id")
+  recursos <- dbGetQuery(con, "SELECT * FROM Recursos ORDER BY id")
+  custos <- dbGetQuery(con, "SELECT * FROM Custos")
+  consumo <- dbGetQuery(con, "SELECT * FROM ConsumoRecursos")
+  demandas <- dbGetQuery(con, "SELECT * FROM Demandas")
+
+  # Variáveis de decisão
+  vars_map <- expand.grid(produto_id = produtos$id, modo_id = modos$id)
+  vars_map <- vars_map[order(vars_map$produto_id, vars_map$modo_id), ]
+  num_vars <- nrow(vars_map)
+
+  var_names <- apply(vars_map, 1, function(row) {
+    nome_produto <- produtos$nome[produtos$id == row["produto_id"]]
+    nome_modo <- modos$nome[modos$id == row["modo_id"]]
+    paste0("Qtd_", nome_produto, "_", nome_modo)
+  })
+
+  # Função objetivo
+  f.obj <- numeric(num_vars)
+  for (i in 1:num_vars) {
+    linha <- vars_map[i, ]
+    row_custo <- custos %>%
+      filter(produto_id == linha$produto_id, modo_id == linha$modo_id)
+    f.obj[i] <- ifelse(tipo_objetivo == "min", row_custo$custo_unitario, -row_custo$lucro_unitario)
+  }
+
+  # Restrições
+  f.con <- list()
+  f.dir <- c()
+  f.rhs <- c()
+
+  # Recursos
+  for (r in seq_len(nrow(recursos))) {
+    linha <- numeric(num_vars)
+    for (i in 1:num_vars) {
+      linha[i] <- consumo %>%
+        filter(
+          produto_id == vars_map$produto_id[i],
+          modo_id == vars_map$modo_id[i],
+          recurso_id == recursos$id[r]
+        ) %>%
+        pull(consumo_unitario) %>%
+        { if (length(.) == 0) 0 else . }
+    }
+    f.con[[length(f.con) + 1]] <- linha
+    f.dir <- c(f.dir, "<=")
+    f.rhs <- c(f.rhs, recursos$capacidade[r])
+  }
+
+  # Demanda terceirizada mínima por produto
+  for (m in seq_len(nrow(produtos))) {
+    linha <- numeric(num_vars)
+    for (i in 1:num_vars) {
+      if (vars_map$produto_id[i] == produtos$id[m] && vars_map$modo_id[i] == 2) {
+        linha[i] <- 1
+      }
+    }
+    f.con[[length(f.con) + 1]] <- linha
+    f.dir <- c(f.dir, ">=")
+    f.rhs <- c(f.rhs, produtos$demanda_terceirizada_minima[m])
+  }
+
+  # Demanda mínima total por produto
+  for (m in seq_len(nrow(produtos))) {
+    linha <- numeric(num_vars)
+    for (i in 1:num_vars) {
+      if (vars_map$produto_id[i] == produtos$id[m]) {
+        linha[i] <- 1
+      }
+    }
+    f.con[[length(f.con) + 1]] <- linha
+    f.dir <- c(f.dir, ">=")
+    f.rhs <- c(f.rhs, produtos$demanda_minima_total[m])
+  }
+
+  # Demanda total (todos os modos)
+  linha_demanda_total <- rep(1, num_vars)
+  f.con[[length(f.con) + 1]] <- linha_demanda_total
+  f.dir <- c(f.dir, ">=")
+  f.rhs <- c(f.rhs, demanda_total)
+
+  # Resolução
+  f.con <- do.call(rbind, f.con)
+  sol <- lpSolve::lp(
+    direction = tipo_objetivo,
+    objective.in = f.obj,
+    const.mat = f.con,
+    const.dir = f.dir,
+    const.rhs = f.rhs,
+    all.int = FALSE
+  )
+
+  if (sol$status == 0) {
+    resultado <- setNames(sol$solution, var_names)
+    if (tipo_objetivo == "max") sol$objval <- -sol$objval
+    list(
+      status = "Sucesso",
+      valor_objetivo = sol$objval,
+      quantidades_produzidas = as.list(resultado),
+      produtos_data = produtos,
+      modos_producao_data = modos,
+      recursos_data = recursos
+    )
+  } else {
+    list(
+      status = paste("Falha - código", sol$status),
+      mensagem = "Solução inviável. Verifique as demandas e capacidades."
+    )
+  }
+}
