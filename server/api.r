@@ -68,9 +68,19 @@ function() {
 #* @get /modos_producao
 function() {
   list(
-    modelos = dbReadTable(con, "ModosProducao")
+    modos_producao = dbReadTable(con, "ModosProducao")
   )
 }
+
+#* Listar os Recursos
+#* Retorna o nome, id e capacidade dos recursos
+#* @get /recursos
+function() {
+  list(
+    recursos = dbReadTable(con, "Recursos")
+  )
+}
+
 
 # --- Rotas de Adição de Dados (CRUD) ---
 # ---------------------------------------
@@ -138,10 +148,13 @@ function(modelo_id, modo_id, recurso_id, consumo_unitario) {
   list(status = "Consumo de recurso registrado")
 }
 
-# --- Rota Principal: Resolver o problema de Programação Linear ---
+# --- Rota Principal: Resolver o problema de Programação Linear (Adaptada) ---
 
-#* Resolve um problema de PL via JSON
-#* Essa é a rota principal a ser chamada
+#* Resolve o problema de programação linear da LCL Motors com dados personalizados
+#* Este endpoint calcula a produção ideal de cada modelo/modo de produção para minimizar o custo total,
+#* respeitando as restrições de recursos e atendendo às demandas (MAIOR OU IGUAL).
+#* Espera um JSON com "tipo_objetivo" e "demandas_personalizadas" (array de {modelo_id, quantidade})
+#* Opcionalmente, pode receber "capacidades_personalizadas" (array de {recurso_id, capacidade})
 #* @post /solucionar
 #* @json
 function(req) {
@@ -152,68 +165,55 @@ function(req) {
     stop("O tipo de objetivo deve ser 'min' ou 'max'")
   }
   
-  variaveis <- body$variaveis
-  restricoes <- body$restricoes
-  
-  f.obj <- sapply(variaveis, function(v) v$constante)
-  f.con <- do.call(rbind, lapply(restricoes, function(r) r$coeficientes))
-  f.dir <- sapply(restricoes, function(r) r$operador)
-  f.rhs <- sapply(restricoes, function(r) r$valor)
-  
-  sol <- lpSolve::lp(
-    direction = tipo_objetivo,
-    objective.in = f.obj,
-    const.mat = f.con,
-    const.dir = f.dir,
-    const.rhs = f.rhs
-  )
-  
-  if (sol$status == 0) {
-    nomes_vars <- sapply(variaveis, function(v) v$motor)
-    list(
-      status = "Sucesso",
-      tipo_objetivo = tipo_objetivo,
-      valor_objetivo = sol$objval,
-      variaveis = setNames(as.numeric(sol$solution), nomes_vars)
-    )
-  } else if (sol$status == 2) {
-    list(
-      status = "Falha: problema inviável",
-      mensagem = "Não há solução que satisfaça todas as restrições"
-    )
-  } else {
-    list(
-      status = paste("Erro (status:", sol$status, ")"),
-      mensagem = "Erro ao resolver o problema. Consulte documentação do lpSolve."
-    )
+  # Parâmetros de entrada da requisição
+  # CONVERTE AS LISTAS PARA DATA FRAMES AQUI
+  demandas_personalizadas <- as.data.frame(do.call(rbind, body$demandas_personalizadas))
+  if (is.null(demandas_personalizadas) || nrow(demandas_personalizadas) == 0) {
+    stop("Demandas personalizadas são necessárias para resolver o problema e não foram fornecidas no formato correto.")
   }
-}
+  # Garante que as colunas 'modelo_id' e 'quantidade' tenham o tipo correto
+  demandas_personalizadas$modelo_id <- as.integer(demandas_personalizadas$modelo_id)
+  demandas_personalizadas$quantidade <- as.integer(demandas_personalizadas$quantidade)
 
 
-#* Resolve o problema de programação linear teste
-#* Este endpoint calcula a produção ideal de cada modelo/modo de produção para minimizar o custo total,
-#* respeitando as restrições de recursos e atendendo às demandas (MAIOR OU IGUAL).
-#* @get /resolver_teste
-function() {
+  capacidades_personalizadas <- NULL
+  if (!is.null(body$capacidades_personalizadas) && length(body$capacidades_personalizadas) > 0) {
+      capacidades_personalizadas <- as.data.frame(do.call(rbind, body$capacidades_personalizadas))
+      # Garante que as colunas 'recurso_id' e 'capacidade' tenham o tipo correto
+      capacidades_personalizadas$recurso_id <- as.integer(capacidades_personalizadas$recurso_id)
+      capacidades_personalizadas$capacidade <- as.numeric(capacidades_personalizadas$capacidade)
+  }
+  
   # 1. Carregar dados do banco de dados (garantindo a ordem para consistência)
   modelos <- dbGetQuery(con, "SELECT id, nome FROM Modelos ORDER BY id")
   modos_producao <- dbGetQuery(con, "SELECT id, nome FROM ModosProducao ORDER BY id")
+  
+  # Carregar recursos e aplicar capacidades personalizadas se existirem
   recursos <- dbGetQuery(con, "SELECT id, nome, capacidade FROM Recursos ORDER BY id")
-  demandas <- dbGetQuery(con, "SELECT modelo_id, quantidade FROM Demandas ORDER BY modelo_id")
+  if (!is.null(capacidades_personalizadas) && nrow(capacidades_personalizadas) > 0) {
+    for (i in 1:nrow(capacidades_personalizadas)) { # Loop pelas linhas do data frame
+      cap_item <- capacidades_personalizadas[i, ]
+      recurso_id_cap <- cap_item$recurso_id
+      nova_capacidade <- cap_item$capacidade
+      if (recurso_id_cap %in% recursos$id) {
+        recursos$capacidade[recursos$id == recurso_id_cap] <- nova_capacidade
+      } else {
+        warning(paste0("Recurso ID ", recurso_id_cap, " para capacidade personalizada não encontrado."))
+      }
+    }
+  }
+
   custos <- dbGetQuery(con, "SELECT modelo_id, modo_id, custo_unitario FROM Custos ORDER BY modelo_id, modo_id")
   consumo_recursos <- dbGetQuery(con, "SELECT modelo_id, modo_id, recurso_id, consumo_unitario FROM ConsumoRecursos ORDER BY modelo_id, modo_id, recurso_id")
 
   # Validação básica de dados essenciais
-  if (nrow(modelos) == 0 || nrow(modos_producao) == 0 || nrow(recursos) == 0 ||
-      nrow(demandas) == 0 || nrow(custos) == 0) {
-    stop("Dados insuficientes para resolver o PL. Verifique se as tabelas Modelos, ModosProducao, Recursos, Demandas e Custos estão preenchidas.")
+  if (nrow(modelos) == 0 || nrow(modos_producao) == 0 || nrow(recursos) == 0 || nrow(custos) == 0) {
+    stop("Dados insuficientes para resolver o PL. Verifique se as tabelas Modelos, ModosProducao, Recursos e Custos estão preenchidas.")
   }
 
   # 2. Definir as variáveis de decisão (quantidades de cada modelo por modo de produção)
-  # Cria uma combinação de todos os modelos com todos os modos de produção.
-  # Esta combinação define as colunas da matriz de restrições e os elementos da função objetivo.
   vars_map <- expand.grid(modelo_id = modelos$id, modo_id = modos_producao$id)
-  vars_map <- vars_map[order(vars_map$modelo_id, vars_map$modo_id), ] # Garante a ordem consistente
+  vars_map <- vars_map[order(vars_map$modelo_id, vars_map$modo_id), ]
   
   num_vars <- nrow(vars_map)
   
@@ -229,48 +229,44 @@ function() {
   })
 
   # 3. Construir o Vetor de Coeficientes da Função Objetivo (f.obj)
-  # O custo total a ser minimizado. Cada coeficiente corresponde a uma variável de decisão.
   f.obj <- rep(0, num_vars)
   for (i in 1:num_vars) {
-    current_modelo_id <- vars_map$modelo_id[i] # Nome mais específico
-    current_modo_id <- vars_map$modo_id[i]     # Nome mais específico
+    current_modelo_id <- vars_map$modelo_id[i]
+    current_modo_id <- vars_map$modo_id[i]
     
     custo_val <- custos %>% 
-      filter(modelo_id == current_modelo_id & modo_id == current_modo_id) %>% # Usando nomes específicos
+      filter(modelo_id == current_modelo_id & modo_id == current_modo_id) %>% 
       pull(custo_unitario)
     
     if (length(custo_val) > 0) {
-      f.obj[i] <- custo_val[1] # Usa o primeiro custo encontrado (idealmente único)
+      f.obj[i] <- custo_val[1]
     } else {
-      # Se não houver custo definido para uma combinação, assume-se 0 (pode ser um erro/alerta)
       warning(paste0("Custo não definido para Modelo ID ", current_modelo_id, " e Modo ID ", current_modo_id, ". Assumindo custo 0."))
     }
   }
 
   # 4. Construir a Matriz de Restrições (f.con), Direções (f.dir) e Lados Direitos (f.rhs)
-  f.con <- NULL # Matriz de coeficientes das restrições
-  f.dir <- c()  # Direções das restrições (<=, >=, =)
-  f.rhs <- c()  # Lados direitos das restrições
+  f.con <- NULL
+  f.dir <- c()
+  f.rhs <- c()
 
   # A. Restrições de Recursos (Consumo <= Capacidade)
-  # Para cada recurso, a soma do consumo de todas as produções não pode exceder sua capacidade.
-  for (r_idx in 1:nrow(recursos)) { # Loop pelos índices dos recursos
+  for (r_idx in 1:nrow(recursos)) {
     current_recurso_id <- recursos$id[r_idx]
     linha_restricao_recurso <- rep(0, num_vars)
     
-    for (v_idx in 1:num_vars) { # Loop pelos índices das variáveis de decisão
-      current_modelo_id_var <- vars_map$modelo_id[v_idx] # Nome mais específico
-      current_modo_id_var <- vars_map$modo_id[v_idx]     # Nome mais específico
+    for (v_idx in 1:num_vars) {
+      current_modelo_id_var <- vars_map$modelo_id[v_idx]
+      current_modo_id_var <- vars_map$modo_id[v_idx]
       
       consumo_val <- consumo_recursos %>%
-        filter(modelo_id == current_modelo_id_var & modo_id == current_modo_id_var & recurso_id == current_recurso_id) %>% # Usando nomes específicos
+        filter(modelo_id == current_modelo_id_var & modo_id == current_modo_id_var & recurso_id == current_recurso_id) %>% 
         pull(consumo_unitario)
       
       if (length(consumo_val) > 0) {
-        linha_restricao_recurso[v_idx] <- consumo_val[1] # Coeficiente de consumo
+        linha_restricao_recurso[v_idx] <- consumo_val[1]
       } else {
-        # Se não houver consumo definido para uma combinação, assume-se 0
-        linha_restricao_recurso[v_idx] <- 0 
+        linha_restricao_recurso[v_idx] <- 0
       }
     }
     
@@ -280,81 +276,92 @@ function() {
   }
 
   # B. Restrições de Demanda (Produção Total do Modelo >= Demanda)
-  # Para cada modelo, a soma das quantidades produzidas (por qualquer modo) DEVE SER MAIOR OU IGUAL à demanda.
-  for (m_idx in 1:nrow(modelos)) { # Loop pelos índices dos modelos
-    current_modelo_id_demanda <- modelos$id[m_idx] # Nome mais específico
+  if (is.null(demandas_personalizadas) || nrow(demandas_personalizadas) == 0) {
+    stop("Demandas personalizadas são necessárias para resolver o problema.")
+  }
+
+  for (m_idx in 1:nrow(modelos)) {
+    current_modelo_id_demanda <- modelos$id[m_idx]
     
     linha_restricao_demanda <- rep(0, num_vars)
     
-    for (v_idx in 1:num_vars) { # Loop pelos índices das variáveis de decisão
-      # Se a variável de decisão atual (vars_map[v_idx,]) corresponde ao modelo atual (current_modelo_id_demanda)
-      # então essa variável contribui para a demanda desse modelo.
+    for (v_idx in 1:num_vars) {
       if (vars_map$modelo_id[v_idx] == current_modelo_id_demanda) {
         linha_restricao_demanda[v_idx] <- 1 
       }
     }
     
-    demanda_val <- demandas %>% 
-      filter(modelo_id == current_modelo_id_demanda) %>% # Usando nome específico
+    demanda_val_req <- demandas_personalizadas %>% 
+      filter(modelo_id == current_modelo_id_demanda) %>%
       pull(quantidade)
     
-    if (length(demanda_val) > 0) {
+    if (length(demanda_val_req) > 0) {
       f.con <- rbind(f.con, linha_restricao_demanda)
       f.dir <- c(f.dir, ">=") 
-      f.rhs <- c(f.rhs, demanda_val[1])
+      f.rhs <- c(f.rhs, demanda_val_req[1])
     } else {
-      warning(paste0("Modelo '", modelos$nome[m_idx], "' (ID: ", current_modelo_id_demanda, ") não tem demanda definida. Restrição de demanda não adicionada."))
+      # Se uma demanda não foi fornecida na requisição, mas o modelo existe, avisamos
+      warning(paste0("Modelo '", modelos$nome[m_idx], "' (ID: ", current_modelo_id_demanda, ") não tem demanda definida na requisição. Restrição de demanda não adicionada para este modelo."))
     }
   }
 
-  # --- INÍCIO: SAÍDA DE DEBUG PARA DIAGNÓSTICO DE INVIABILIDADE ---
-  print("--- Dados do Modelo LP para Debug ---")
-  print("Variáveis de Decisão (vars_map e var_names):")
-  print(vars_map)
-  print(var_names)
-  
-  print("Coeficientes da Função Objetivo (f.obj):")
-  print(f.obj)
-  
-  print("Matriz de Restrições (f.con):")
-  print(f.con)
-  
-  print("Direções das Restrições (f.dir):")
-  print(f.dir)
-  
-  print("Lado Direito das Restrições (f.rhs):")
-  print(f.rhs)
-  print("--- FIM: SAÍDA DE DEBUG ---")
+  # --- SAÍDA DE DEBUG PARA DIAGNÓSTICO DE INVIABILIDADE ---
+  # Comente ou remova estas linhas para produção
+  # print("--- Dados do Modelo LP para Debug ---")
+  # print("Variáveis de Decisão (vars_map e var_names):")
+  # print(vars_map)
+  # print("Coeficientes da Função Objetivo (f.obj):")
+  # print(f.obj)
+  # print("Matriz de Restrições (f.con):")
+  # print(f.con)
+  # print("Direções das Restrições (f.dir):")
+  # print(f.dir)
+  # print("Lado Direito das Restrições (f.rhs):")
+  # print(f.rhs)
+  # print("--- FIM: SAÍDA DE DEBUG ---")
 
   # 5. Resolver o problema de programação linear
-  # O lpSolve assume automaticamente que as variáveis são não-negativas (lower bound = 0)
   sol <- lp(
-    direction = "min", # Minimizar o custo (pode ser "max" para maximizar lucro, por exemplo)
+    direction = tipo_objetivo,
     objective.in = f.obj,
     const.mat = f.con,
     const.dir = f.dir,
     const.rhs = f.rhs,
-    all.int = FALSE    # Define se as variáveis de decisão devem ser inteiras (TRUE) ou podem ser decimais (FALSE)
+    all.int = FALSE
   )
 
   # 6. Retornar os resultados
-  if (sol$status == 0) { # Status 0 indica que uma solução ótima foi encontrada
-    # Mapeia as soluções numéricas para os nomes descritivos das variáveis
+  if (sol$status == 0) {
     solucao_nomeada <- setNames(sol$solution, var_names)
     list(
       status = "Sucesso",
-      custo_minimo_total = sol$objval,
-      quantidades_produzidas = solucao_nomeada
+      valor_objetivo = sol$objval,
+      quantidades_produzidas = as.list(solucao_nomeada), # CORREÇÃO AQUI para garantir objeto nomeado
+      # --- NOVOS DADOS ADICIONADOS PARA O FRONTEND ---
+      modelos_data = modelos,
+      modos_producao_data = modos_producao,
+      recursos_data = recursos, # Inclui as capacidades atualizadas
+      consumo_recursos_data = consumo_recursos,
+      demandas_input = demandas_personalizadas # Inclui as demandas que o usuário inseriu
+      # --- FIM DOS NOVOS DADOS ---
     )
-  } else if (sol$status == 2) { # Status 2 indica que o problema é inviável (sem solução que atenda todas as restrições)
+  } else if (sol$status == 2) {
     list(
       status = "Falha: Problema inviável",
       mensagem = "Não foi possível encontrar uma solução que satisfaça todas as restrições com os dados fornecidos. Verifique as capacidades e demandas."
     )
-  } else { # Outros status indicam falha ou erro
+  } else {
     list(
       status = paste("Falha com código:", sol$status),
       mensagem = "Ocorreu um erro inesperado ao resolver o problema de programação linear. Consulte a documentação do lpSolve para códigos de status."
     )
   }
 }
+
+# Rota original /solucionar_old comentada para evitar conflitos.
+# #* @post /solucionar_old
+# #* @json
+# # function(req) {
+# #   body <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+# # # ... (restante do código original)
+# # }
