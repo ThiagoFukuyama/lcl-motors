@@ -13,17 +13,17 @@ con <- dbConnect(RSQLite::SQLite(), "motorsdb.db")
 
 # Função para criar as tabelas se não existirem (garante a estrutura em caso de execução sem o script SQL externo)
 # É uma boa prática tê-la, mas a ideia é que o schema_lcl.sql seja executado primeiro.
-create_tables <- function(con) {
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS Modelos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, demanda_terceirizada_minima INTEGER DEFAULT 0)")
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS ModosProducao (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL)")
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS Recursos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, capacidade REAL NOT NULL)")
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS Demandas (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, quantidade INTEGER NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id))")
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS Custos (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, modo_id INTEGER, custo_unitario REAL NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id), FOREIGN KEY (modo_id) REFERENCES ModosProducao(id))")
-  dbExecute(con, "CREATE TABLE IF NOT EXISTS ConsumoRecursos (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, modo_id INTEGER, recurso_id INTEGER, consumo_unitario REAL NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id), FOREIGN KEY (modo_id) REFERENCES ModosProducao(id), FOREIGN KEY (recurso_id) REFERENCES Recursos(id))")
-}
+#create_tables <- function(con) {
+#  dbExecute(con, "CREATE TABLE IF NOT EXISTS Modelos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, demanda_terceirizada_minima INTEGER DEFAULT 0)")
+#  dbExecute(con, "CREATE TABLE IF NOT EXISTS ModosProducao (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL)")
+#  dbExecute(con, "CREATE TABLE IF NOT EXISTS Recursos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, capacidade REAL NOT NULL)")
+#  dbExecute(con, "CREATE TABLE IF NOT EXISTS Demandas (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, quantidade INTEGER NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id))")
+#  dbExecute(con, "CREATE TABLE IF NOT EXISTS Custos (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, modo_id INTEGER, custo_unitario REAL NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id), FOREIGN KEY (modo_id) REFERENCES ModosProducao(id))")
+#  dbExecute(con, "CREATE TABLE IF NOT EXISTS ConsumoRecursos (id INTEGER PRIMARY KEY AUTOINCREMENT, modelo_id INTEGER, modo_id INTEGER, recurso_id INTEGER, consumo_unitario REAL NOT NULL, FOREIGN KEY (modelo_id) REFERENCES Modelos(id), FOREIGN KEY (modo_id) REFERENCES ModosProducao(id), FOREIGN KEY (recurso_id) REFERENCES Recursos(id))")
+#}
 
 # Garante que as tabelas sejam criadas ao iniciar a API
-create_tables(con)
+#create_tables(con)
 
 
 #* @apiTitle API de Programação Linear - Sistema Genérico de Produção
@@ -298,13 +298,12 @@ function(id, nome, demanda_terceirizada_minima = 0, demanda_minima_total = 0, cu
 function(id) {
   id <- as.integer(id)
 
-  # Remove registros dependentes usando modelo_id
-  dbExecute(con, "DELETE FROM Custos WHERE modelo_id = ?", params = list(id))
-  dbExecute(con, "DELETE FROM ConsumoRecursos WHERE modelo_id = ?", params = list(id))
-  dbExecute(con, "DELETE FROM Demandas WHERE modelo_id = ?", params = list(id))
+  # Remove registros dependentes usando produto_id
+  dbExecute(con, "DELETE FROM Custos WHERE produto_id = ?", params = list(id))
+  dbExecute(con, "DELETE FROM ConsumoRecursos WHERE produto_id = ?", params = list(id))
 
-  # Remove o produto (modelo)
-  dbExecute(con, "DELETE FROM Modelos WHERE id = ?", params = list(id))
+  # Remove o produto (produto)
+  dbExecute(con, "DELETE FROM Produtos WHERE id = ?", params = list(id))
 
   list(status = "Produto e dados relacionados deletados com sucesso")
 }
