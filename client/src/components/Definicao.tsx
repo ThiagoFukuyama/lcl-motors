@@ -1,10 +1,5 @@
 // client/src/components/Definicao.tsx
 import { useState, useEffect } from "react";
-import type {
-    DemandaInput,
-    CapacidadeInput,
-    ResultadoPL,
-} from "../pages/Problema";
 import { Eraser } from "lucide-react";
 
 interface Modelo {
@@ -12,98 +7,57 @@ interface Modelo {
     nome: string;
 }
 
-interface Recurso {
-    id: number;
-    nome: string;
-    capacidade: number;
-}
-
 interface DefinicaoProps {
-    onResolver: (resultado: ResultadoPL) => void;
+    onResolver: (resultado: any) => void;
 }
 
 export default function Definicao({ onResolver }: DefinicaoProps) {
     const [modelos, setModelos] = useState<Modelo[]>([]);
-    const [recursos, setRecursos] = useState<Recurso[]>([]);
-    const [demandas, setDemandas] = useState<DemandaInput[]>([]);
-    const [capacidades, setCapacidades] = useState<CapacidadeInput[]>([]);
+    const [produtosSelecionados, setProdutosSelecionados] = useState<string[]>(
+        []
+    );
     const [tipoObjetivo, setTipoObjetivo] = useState<"min" | "max">("min");
+    const [demandaTotal, setDemandaTotal] = useState<number>(0);
 
-    // Carrega modelos e recursos do backend ao iniciar o componente
     useEffect(() => {
-        const fetchDadosIniciais = async () => {
+        const fetchProdutos = async () => {
             try {
-                const [resModelos, resRecursos] = await Promise.all([
-                    fetch("/api/modelos"),
-                    fetch("/api/recursos"),
-                ]);
+                const res = await fetch("/api/produtos");
+                const data = await res.json();
 
-                const dataModelos = await resModelos.json();
-                const dataRecursos = await resRecursos.json();
-
-                const fetchedModelos: Modelo[] = dataModelos.modelos || [];
-                const fetchedRecursos: Recurso[] = dataRecursos.recursos || [];
+                const fetchedModelos = (data.produtos || []).map((p: any) => ({
+                    id: p.id[0],
+                    nome: p.nome[0],
+                }));
 
                 setModelos(fetchedModelos);
-                setRecursos(fetchedRecursos);
-
-                // Inicializa as demandas com base nos modelos carregados
-                const initialDemandas: DemandaInput[] = fetchedModelos.map(
-                    (m) => ({
-                        modelo_id: m.id,
-                        quantidade: 0, // Valor inicial da demanda
-                    })
-                );
-                setDemandas(initialDemandas);
-
-                // Inicializa as capacidades com base nos recursos carregados
-                const initialCapacidades: CapacidadeInput[] =
-                    fetchedRecursos.map((r) => ({
-                        recurso_id: r.id,
-                        capacidade: r.capacidade, // Usa a capacidade padrão do DB
-                    }));
-                setCapacidades(initialCapacidades);
+                setProdutosSelecionados([]); // limpa seleção
             } catch (error) {
-                console.error(
-                    "Erro ao buscar dados iniciais (modelos/recursos):",
-                    error
-                );
+                console.error("Erro ao buscar produtos:", error);
             }
         };
 
-        fetchDadosIniciais();
+        fetchProdutos();
     }, []);
 
-    const handleDemandaChange = (modeloId: number, quantidade: number) => {
-        setDemandas((prev) =>
-            prev.map((d) =>
-                d.modelo_id === modeloId ? { ...d, quantidade } : d
-            )
-        );
-    };
-
-    const handleCapacidadeChange = (recursoId: number, capacidade: number) => {
-        setCapacidades((prev) =>
-            prev.map((c) =>
-                c.recurso_id === recursoId ? { ...c, capacidade } : c
-            )
-        );
+    const handleSelecionarProdutos = (
+        e: React.ChangeEvent<HTMLSelectElement>
+    ) => {
+        const options = Array.from(e.target.selectedOptions);
+        const valores = options.map((opt) => opt.value);
+        setProdutosSelecionados(valores);
     };
 
     const handleLimpar = () => {
-        // Reinicializa as demandas e capacidades para seus estados originais
-        setDemandas(modelos.map((m) => ({ modelo_id: m.id, quantidade: 0 })));
-        setCapacidades(
-            recursos.map((r) => ({
-                recurso_id: r.id,
-                capacidade: r.capacidade,
-            }))
-        );
+        setProdutosSelecionados([]);
+        setDemandaTotal(0);
         setTipoObjetivo("min");
     };
 
     const podeResolver =
-        demandas.length > 0 && demandas.every((d) => d.quantidade >= 0);
+        produtosSelecionados.length > 0 &&
+        demandaTotal > 0 &&
+        demandaTotal >= 0;
 
     const handleClickResolver = async () => {
         if (!podeResolver) return;
@@ -111,11 +65,11 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
         try {
             const payload = {
                 tipo_objetivo: tipoObjetivo,
-                demandas_personalizadas: demandas,
-                capacidades_personalizadas: capacidades, // Envia as capacidades também
+                produtos: produtosSelecionados,
+                demanda_total: demandaTotal,
             };
 
-            const response = await fetch("api/solucionar", {
+            const response = await fetch("/api/resolver", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -159,80 +113,45 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                     </button>
                 </div>
 
-                {/* Seção de Demandas */}
-                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border-1 border-gray-300">
+                {/* Select múltiplo produtos */}
+                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border border-gray-300">
                     <h2 className="text-lg font-semibold text-gray-700 mb-3">
-                        Demandas de Modelos (unidades)
+                        Selecione os Produtos
                     </h2>
-                    <div className="space-y-3">
+                    <select
+                        multiple
+                        size={10}
+                        value={produtosSelecionados}
+                        onChange={handleSelecionarProdutos}
+                        className="w-full p-2 border rounded shadow-sm cursor-pointer h-28 overflow-y-auto"
+                    >
                         {modelos.map((modelo) => (
-                            <div
-                                key={modelo.id}
-                                className="flex items-center gap-4"
-                            >
-                                <label className="w-24 text-gray-700 font-medium">
-                                    {modelo.nome}:
-                                </label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    value={
-                                        demandas.find(
-                                            (d) => d.modelo_id === modelo.id
-                                        )?.quantidade || ""
-                                    }
-                                    onChange={(e) =>
-                                        handleDemandaChange(
-                                            modelo.id,
-                                            Number(e.target.value)
-                                        )
-                                    }
-                                    className="p-2 rounded border shadow-sm flex-1 w-full"
-                                    placeholder="Quantidade demandada"
-                                />
-                            </div>
+                            <option key={modelo.id} value={modelo.nome}>
+                                {modelo.nome}
+                            </option>
                         ))}
-                    </div>
+                    </select>
                 </div>
 
-                {/* Seção de Capacidades de Recursos */}
-                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border-1 border-gray-300">
+                {/* Input demanda total */}
+                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border border-gray-300">
                     <h2 className="text-lg font-semibold text-gray-700 mb-3">
-                        Capacidades de Recursos (horas)
+                        Demanda Total (unidades)
                     </h2>
-                    <div className="space-y-3">
-                        {recursos.map((recurso) => (
-                            <div
-                                key={recurso.id}
-                                className="flex items-center gap-4"
-                            >
-                                <label className="w-24 text-gray-700 font-medium">
-                                    {recurso.nome}:
-                                </label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    value={
-                                        capacidades.find(
-                                            (c) => c.recurso_id === recurso.id
-                                        )?.capacidade || ""
-                                    }
-                                    onChange={(e) =>
-                                        handleCapacidadeChange(
-                                            recurso.id,
-                                            Number(e.target.value)
-                                        )
-                                    }
-                                    className="p-2 rounded border shadow-sm flex-1 w-full"
-                                    placeholder="Capacidade disponível"
-                                />
-                            </div>
-                        ))}
-                    </div>
+                    <input
+                        type="number"
+                        min={0}
+                        value={demandaTotal || ""}
+                        onChange={(e) =>
+                            setDemandaTotal(Number(e.target.value))
+                        }
+                        placeholder="Digite a demanda total"
+                        className="w-full p-2 border rounded shadow-sm"
+                    />
                 </div>
 
                 {/* Tipo de Objetivo */}
-                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border-1 border-gray-300">
+                <div className="rounded-xl shadow-md p-4 mb-6 bg-white border border-gray-300">
                     <h2 className="text-lg font-semibold text-gray-700 mb-3">
                         Tipo de Objetivo
                     </h2>
@@ -259,7 +178,7 @@ export default function Definicao({ onResolver }: DefinicaoProps) {
                         }`}
                         title={
                             !podeResolver
-                                ? "Preencha as demandas antes de resolver"
+                                ? "Selecione produtos e informe demanda total antes de resolver"
                                 : "Resolver"
                         }
                     >

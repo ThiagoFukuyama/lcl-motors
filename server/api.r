@@ -53,14 +53,7 @@ function() {
   )
 }
 
-#* Listar os Produtos
-#* Retorna o nome e id dos produtos
-#* @get /produtos
-function() {
-  list(
-    produtos = dbReadTable(con, "Produtos")
-  )
-}
+
 
 #* Listar os Modos de Produção
 #* Retorna o nome e id dos modos
@@ -141,6 +134,64 @@ function(nome, demanda_terceirizada_minima = 0, demanda_minima_total = 0, custos
   list(status = "Produto criado com sucesso", produto_id = id)
 }
 
+
+#* @get /produtos
+function() {
+  # Buscar todos os produtos básicos
+  produtos <- dbGetQuery(con, "
+    SELECT id, nome, demanda_terceirizada_minima, demanda_minima_total
+    FROM Produtos
+  ")
+
+  # Para cada produto, buscar custos, consumos e montar objeto completo
+  lista_completa <- lapply(produtos$id, function(pid) {
+    # Dados básicos do produto
+    prod <- produtos[produtos$id == pid, ]
+
+    # Buscar custos e lucros por modo (1 = interno, 2 = externo)
+    custos <- dbGetQuery(con, "
+      SELECT modo_id, custo_unitario, lucro_unitario
+      FROM Custos
+      WHERE produto_id = ?", params = list(pid)
+    )
+
+    # Extrair custos e lucros para interno e externo
+    custoInterno <- ifelse(any(custos$modo_id == 1), custos$custo_unitario[custos$modo_id == 1], 0)
+    lucroInterno <- ifelse(any(custos$modo_id == 1), custos$lucro_unitario[custos$modo_id == 1], 0)
+    custoExterno <- ifelse(any(custos$modo_id == 2), custos$custo_unitario[custos$modo_id == 2], 0)
+    lucroExterno <- ifelse(any(custos$modo_id == 2), custos$lucro_unitario[custos$modo_id == 2], 0)
+
+    # Buscar consumos internos (modo_id = 1)
+    consumos_df <- dbGetQuery(con, "
+      SELECT recurso_id, consumo_unitario
+      FROM ConsumoRecursos
+      WHERE produto_id = ? AND modo_id = 1
+    ", params = list(pid))
+
+    # Transformar consumos em named list: recurso_id -> consumo_unitario
+    consumos <- setNames(as.list(consumos_df$consumo_unitario), consumos_df$recurso_id)
+
+    # Montar e retornar objeto completo do produto
+    list(
+      id = prod$id,
+      nome = prod$nome,
+      custoInterno = ifelse(length(custoInterno) > 0, custoInterno, 0),
+      lucroInterno = ifelse(length(lucroInterno) > 0, lucroInterno, 0),
+      custoExterno = ifelse(length(custoExterno) > 0, custoExterno, 0),
+      lucroExterno = ifelse(length(lucroExterno) > 0, lucroExterno, 0),
+      demandaMinimaTerceirizada = ifelse(is.na(prod$demanda_terceirizada_minima), 0, prod$demanda_terceirizada_minima),
+      demandaMinimaTotal = ifelse(is.na(prod$demanda_minima_total), 0, prod$demanda_minima_total),
+      consumos = consumos
+    )
+  })
+
+  # Retornar lista completa
+  list(produtos = lista_completa)
+}
+
+
+
+
 #* Obter produto por ID com dados completos
 #* @serializer json
 #* @get /produto/<id:int>
@@ -180,79 +231,86 @@ function(id) {
 }
 
 #* Atualizar produto
-#* Atualiza dados do produto, seus custos/lucros e consumos de recursos (modo interno).
-#* @param nome Novo nome do produto.
-#* @param demanda_terceirizada_minima Nova demanda terceirizada mínima.
-#* @param demanda_minima_total Nova demanda mínima total
-#* @param custos Lista de listas com: modo_id, custo_unitario, lucro_unitario.
-#* @param consumos Lista de listas com: recurso_id, consumo_unitario. (somente para modo_id = 1)
 #* @put /produto/<id:int>
 function(id, nome, demanda_terceirizada_minima = 0, demanda_minima_total = 0, custos = NULL, consumos = NULL) {
   id <- as.integer(id)
   demanda_terceirizada_minima <- as.integer(demanda_terceirizada_minima)
   demanda_minima_total <- as.integer(demanda_minima_total)
 
-  if (is.data.frame(custos)) {
-    custos <- split(custos, seq(nrow(custos)))
+  if (is.null(nome) || nome == "") {
+    stop("O nome do produto é obrigatório.")
   }
 
-  if (is.data.frame(consumos)) {
-    consumos <- split(consumos, seq(nrow(consumos)))
-  }
+  # Atualiza o produto
+  dbExecute(con,
+    "UPDATE Produtos SET nome = ?, demanda_terceirizada_minima = ?, demanda_minima_total = ? WHERE id = ?",
+    params = list(nome, demanda_terceirizada_minima, demanda_minima_total, id)
+  )
 
-  dbExecute(con, "UPDATE Produtos SET nome = ?, demanda_terceirizada_minima = ?, demanda_minima_total WHERE id = ?",
-            params = list(nome, demanda_terceirizada_minima, demanda_minima_total, id))
-
+  # Atualiza custos
   if (!is.null(custos)) {
+    if (is.data.frame(custos)) {
+      custos <- split(custos, seq(nrow(custos)))
+    }
+
     dbExecute(con, "DELETE FROM Custos WHERE produto_id = ?", params = list(id))
-  }
 
-  for (custo in custos) {
-    dbExecute(con,
-      "INSERT INTO Custos (produto_id, modo_id, custo_unitario, lucro_unitario) VALUES (?, ?, ?, ?)",
-      params = list(
-        id,
-        as.integer(custo$modo_id),
-        as.numeric(custo$custo_unitario),
-        as.numeric(custo$lucro_unitario)
+    for (custo in custos) {
+      dbExecute(con,
+        "INSERT INTO Custos (produto_id, modo_id, custo_unitario, lucro_unitario) VALUES (?, ?, ?, ?)",
+        params = list(
+          id,
+          as.integer(custo$modo_id),
+          as.numeric(custo$custo_unitario),
+          as.numeric(custo$lucro_unitario)
+        )
       )
-    )
+    }
   }
 
+  # Atualiza consumos (modo interno)
   if (!is.null(consumos)) {
-    dbExecute(con, "DELETE FROM ConsumoRecursos WHERE produto_id = ? AND modo_id = 1", params = list(id)) 
-  }
+    if (is.data.frame(consumos)) {
+      consumos <- split(consumos, seq(nrow(consumos)))
+    }
 
-  for (consumo in consumos) {
-    dbExecute(con,
-      "INSERT INTO ConsumoRecursos (produto_id, modo_id, recurso_id, consumo_unitario) VALUES (?, 1, ?, ?)",
-      params = list(
-        id,
-        as.integer(consumo$recurso_id),
-        as.numeric(consumo$consumo_unitario)
+    dbExecute(con, "DELETE FROM ConsumoRecursos WHERE produto_id = ? AND modo_id = 1", params = list(id))
+
+    for (consumo in consumos) {
+      dbExecute(con,
+        "INSERT INTO ConsumoRecursos (produto_id, modo_id, recurso_id, consumo_unitario) VALUES (?, 1, ?, ?)",
+        params = list(
+          id,
+          as.integer(consumo$recurso_id),
+          as.numeric(consumo$consumo_unitario)
+        )
       )
-    )
+    }
   }
 
-  list(status = "Produto e dados relacionados atualizados com sucesso")
+  list(status = "Produto atualizado com sucesso", produto_id = id)
 }
 
-#* Deletar produto
-#* Remove também registros dependentes do produto (custos, consumos, demandas).
+
+
+#* Deletar produto e dados relacionados
 #* @delete /produto/<id:int>
 function(id) {
   id <- as.integer(id)
 
-  # Remove registros dependentes
-  dbExecute(con, "DELETE FROM Custos WHERE produto_id = ?", params = list(id))
-  dbExecute(con, "DELETE FROM ConsumoRecursos WHERE produto_id = ?", params = list(id))
-  dbExecute(con, "DELETE FROM Demandas WHERE produto_id = ?", params = list(id))
+  # Remove registros dependentes usando modelo_id
+  dbExecute(con, "DELETE FROM Custos WHERE modelo_id = ?", params = list(id))
+  dbExecute(con, "DELETE FROM ConsumoRecursos WHERE modelo_id = ?", params = list(id))
+  dbExecute(con, "DELETE FROM Demandas WHERE modelo_id = ?", params = list(id))
 
-  # Remove o produto
-  dbExecute(con, "DELETE FROM Produtos WHERE id = ?", params = list(id))
+  # Remove o produto (modelo)
+  dbExecute(con, "DELETE FROM Modelos WHERE id = ?", params = list(id))
 
   list(status = "Produto e dados relacionados deletados com sucesso")
 }
+
+
+
 
 # --- Recursos (CRUD) ---
 # -----------------------

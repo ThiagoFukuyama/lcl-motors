@@ -1,6 +1,5 @@
-// client/src/components/Resultado.tsx
 import type { ResultadoPL } from "../pages/Problema";
-import { Bar } from "react-chartjs-2"; // Importe o componente Bar
+import { Bar } from "react-chartjs-2";
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -9,9 +8,8 @@ import {
     Title,
     Tooltip,
     Legend,
-} from "chart.js"; // Importe os elementos necessários do Chart.js
+} from "chart.js";
 
-// Registre os elementos do Chart.js que você vai usar
 ChartJS.register(
     CategoryScale,
     LinearScale,
@@ -27,75 +25,65 @@ type ResultadoProps = {
 };
 
 export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
-    // Extrair dados da resposta para facilitar o acesso
     const {
         quantidades_produzidas,
         valor_objetivo,
-        modelos_data,
+        produtos_data,
         modos_producao_data,
         recursos_data,
-        consumo_recursos_data,
-        demandas_input,
         status,
         mensagem,
     } = resultado;
 
-    // --- LÓGICA PARA AGRUPAMENTO E CÁLCULO ---
-
-    // 1. Agrupar quantidades produzidas por modelo e modo
+    // Agrupamento da produção por modelo e modo
     const producaoDetalhada: {
         [modeloId: number]: {
             nome: string;
-            producao: {
-                modo: string;
-                quantidade: number;
-            }[];
+            producao: { modo: string; quantidade: number }[];
             totalProduzido: number;
             demandaAtendida: boolean;
             demandaOriginal: number;
         };
     } = {};
 
-    modelos_data.forEach((modelo) => {
-        producaoDetalhada[modelo.id] = {
-            nome: modelo.nome,
+    produtos_data.forEach((produto) => {
+        producaoDetalhada[produto.id] = {
+            nome: produto.nome,
             producao: [],
             totalProduzido: 0,
             demandaAtendida: false,
-            demandaOriginal: 0,
+            demandaOriginal: produto.demanda_minima_total,
         };
     });
 
     Object.entries(quantidades_produzidas).forEach(([nomeVar, valorArray]) => {
         const valor = valorArray[0];
-        const partes = nomeVar.split("_");
+        const partes = nomeVar.split("_"); // Exemplo: Qtd_Modelo 2_Interno
 
         const modeloNomeCompleto = partes[1];
         const modoNome = partes[2];
 
-        const modelo = modelos_data.find((m) => m.nome === modeloNomeCompleto);
+        const produto = produtos_data.find(
+            (p) => p.nome === modeloNomeCompleto
+        );
         const modo = modos_producao_data.find((mp) => mp.nome === modoNome);
 
-        if (modelo && modo) {
-            producaoDetalhada[modelo.id].producao.push({
+        if (produto && modo) {
+            producaoDetalhada[produto.id].producao.push({
                 modo: modo.nome,
                 quantidade: valor,
             });
-            producaoDetalhada[modelo.id].totalProduzido += valor;
+            producaoDetalhada[produto.id].totalProduzido += valor;
         }
     });
 
-    demandas_input.forEach((demanda) => {
-        if (producaoDetalhada[demanda.modelo_id]) {
-            producaoDetalhada[demanda.modelo_id].demandaOriginal =
-                demanda.quantidade;
-            producaoDetalhada[demanda.modelo_id].demandaAtendida =
-                producaoDetalhada[demanda.modelo_id].totalProduzido >=
-                demanda.quantidade;
-        }
+    // Checar se demanda foi atendida
+    Object.values(producaoDetalhada).forEach((modelo) => {
+        modelo.demandaAtendida =
+            modelo.totalProduzido >= modelo.demandaOriginal;
     });
 
-    // 2. Calcular Utilização de Recursos
+    // Cálculo de utilização dos recursos (simplificado, já que não há dados de consumo)
     const utilizacaoRecursos: {
         [recursoId: number]: {
             nome: string;
@@ -109,60 +97,24 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
         utilizacaoRecursos[recurso.id] = {
             nome: recurso.nome,
             capacidade: recurso.capacidade,
-            utilizado: 0,
+            utilizado: 0, // Sem dados para cálculo real
             ocupacao: 0,
         };
     });
 
-    Object.entries(quantidades_produzidas).forEach(([nomeVar, valorArray]) => {
-        const valor = valorArray[0];
-        const partes = nomeVar.split("_");
-
-        const modeloNomeCompleto = partes[1];
-        const modoNome = partes[2];
-
-        const modelo = modelos_data.find((m) => m.nome === modeloNomeCompleto);
-        const modo = modos_producao_data.find((mp) => mp.nome === modoNome);
-
-        if (modelo && modo) {
-            consumo_recursos_data
-                .filter(
-                    (cr) => cr.modelo_id === modelo.id && cr.modo_id === modo.id
-                )
-                .forEach((cr) => {
-                    utilizacaoRecursos[cr.recurso_id].utilizado +=
-                        valor * cr.consumo_unitario;
-                });
-        }
-    });
-
-    // Calcular porcentagem de ocupação
-    recursos_data.forEach((recurso) => {
-        if (utilizacaoRecursos[recurso.id].capacidade > 0) {
-            utilizacaoRecursos[recurso.id].ocupacao =
-                (utilizacaoRecursos[recurso.id].utilizado /
-                    utilizacaoRecursos[recurso.id].capacidade) *
-                100;
-        } else {
-            utilizacaoRecursos[recurso.id].ocupacao = 0;
-        }
-    });
-
-    // --- FIM DA LÓGICA DE CÁLCULO ---
-
-    // --- PREPARAÇÃO DE DADOS PARA O GRÁFICO ---
-    const chartLabels = modelos_data.map((m) => m.nome);
-    const producaoInternaData = modelos_data.map((modelo) => {
-        const producao = producaoDetalhada[modelo.id]?.producao.find(
+    // Dados para gráfico de produção
+    const chartLabels = produtos_data.map((p) => p.nome);
+    const producaoInternaData = produtos_data.map((produto) => {
+        const p = producaoDetalhada[produto.id].producao.find(
             (p) => p.modo === "Interno"
         );
-        return producao ? producao.quantidade : 0;
+        return p ? p.quantidade : 0;
     });
-    const producaoTerceirizadaData = modelos_data.map((modelo) => {
-        const producao = producaoDetalhada[modelo.id]?.producao.find(
+    const producaoTerceirizadaData = produtos_data.map((produto) => {
+        const p = producaoDetalhada[produto.id].producao.find(
             (p) => p.modo === "Terceirizado"
         );
-        return producao ? producao.quantidade : 0;
+        return p ? p.quantidade : 0;
     });
 
     const chartData = {
@@ -188,31 +140,20 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
     const chartOptions = {
         responsive: true,
         plugins: {
-            legend: {
-                position: "top" as const,
-            },
+            legend: { position: "top" as const },
             title: {
                 display: true,
                 text: "Comparativo de Produção por Modelo (Interna vs. Terceirizada)",
             },
         },
         scales: {
-            x: {
-                title: {
-                    display: true,
-                    text: "Modelo de Motor",
-                },
-            },
+            x: { title: { display: true, text: "Modelo de Motor" } },
             y: {
-                title: {
-                    display: true,
-                    text: "Unidades Produzidas",
-                },
+                title: { display: true, text: "Unidades Produzidas" },
                 beginAtZero: true,
             },
         },
     };
-    // --- FIM DA PREPARAÇÃO DE DADOS PARA O GRÁFICO ---
 
     return (
         <div className="min-h-screen flex items-center justify-center px-4 py-10">
@@ -245,32 +186,27 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                     </span>
                 </div>
 
-                {/* Seção de Demandas Inseridas */}
+                {/* Demandas Inseridas */}
                 <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
                     <h3 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2">
                         Demandas Inseridas
                     </h3>
                     <ul className="space-y-2">
-                        {demandas_input.map((demanda) => {
-                            const modelo = modelos_data.find(
-                                (m) => m.id === demanda.modelo_id
-                            );
+                        {produtos_data.map((produto) => {
+                            const modelo = producaoDetalhada[produto.id];
                             return (
-                                <li
-                                    key={demanda.modelo_id}
-                                    className="text-gray-700"
-                                >
+                                <li key={produto.id} className="text-gray-700">
                                     <span className="font-semibold">
-                                        {modelo?.nome}:
+                                        {modelo.nome}:
                                     </span>{" "}
-                                    {demanda.quantidade} unidades
+                                    {modelo.demandaOriginal} unidades
                                 </li>
                             );
                         })}
                     </ul>
                 </div>
 
-                {/* Seção de Capacidades de Recursos Definidas */}
+                {/* Capacidades de Recursos */}
                 <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
                     <h3 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2">
                         Capacidades de Recursos Definidas
@@ -287,7 +223,7 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                     </ul>
                 </div>
 
-                {/* Seção de Produção Detalhada por Modelo */}
+                {/* Produção Detalhada por Modelo */}
                 <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
                     <h3 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2">
                         Distribuição da Produção por Modelo
@@ -313,7 +249,7 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                             <ul className="list-disc pl-5 space-y-1">
                                 {modelo.producao.map((item, idx) => (
                                     <li key={idx} className="text-gray-700">
-                                        **{item.modo}**:{" "}
+                                        <strong>{item.modo}:</strong>{" "}
                                         {item.quantidade.toFixed(0)} unidades
                                     </li>
                                 ))}
@@ -326,7 +262,7 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                     ))}
                 </div>
 
-                {/* Seção de Utilização de Recursos */}
+                {/* Utilização de Recursos */}
                 <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
                     <h3 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2">
                         Utilização de Recursos
@@ -345,25 +281,14 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                     </ul>
                 </div>
 
-                {/* --- NOVA SEÇÃO: GRÁFICO DE PRODUÇÃO --- */}
+                {/* Gráfico */}
                 <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
                     <h3 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2">
                         Gráfico Comparativo de Produção
                     </h3>
                     <div className="h-96">
-                        {" "}
-                        {/* Altura fixa para o gráfico */}
                         <Bar data={chartData} options={chartOptions} />
                     </div>
-                </div>
-                {/* --- FIM DA NOVA SEÇÃO --- */}
-
-                <div className="flex justify-center mt-6">
-                    <img
-                        src={""}
-                        alt="Gráfico do resultado (visualização futura)"
-                        className="max-w-full max-h-64 rounded-lg shadow-lg"
-                    />
                 </div>
             </div>
         </div>

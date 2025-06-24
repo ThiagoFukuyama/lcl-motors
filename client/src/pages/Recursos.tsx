@@ -32,15 +32,69 @@ const Recursos = () => {
         fetchRecursos();
     }, []);
 
-    const handleConfirmarExclusao = () => {
-        if (!recursoParaExcluir) return;
-        console.log("Excluir recurso:", recursoParaExcluir);
-        setRecursoParaExcluir(null);
-    };
+    const handleConfirmarExclusao = async () => {
+        if (!recursoParaExcluir || !recursoParaExcluir.id) return;
 
-    const handleSalvarRecurso = (recurso: Recurso) => {
-        console.log("Salvar recurso:", recurso);
-        setMostrarModalRecurso(false);
+        try {
+            const response = await fetch(
+                `/api/recursos/${recursoParaExcluir.id}`,
+                {
+                    method: "DELETE",
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error("Erro ao deletar o recurso");
+            }
+
+            // Atualiza a lista após exclusão
+            const res = await fetch("/api/recursos");
+            const data = await res.json();
+            setRecursos(data.recursos);
+
+            setRecursoParaExcluir(null);
+            setMostrarModalRecurso(false);
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao excluir recurso.");
+        }
+    };
+    const handleSalvarRecurso = async (recurso: Recurso) => {
+        const isEdicao = !!recurso.id;
+
+        try {
+            const url = isEdicao
+                ? `/api/recursos/${recurso.id}`
+                : "/api/recurso";
+            const method = isEdicao ? "PUT" : "POST";
+
+            const response = await fetch(url, {
+                method,
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    nome: recurso.nome,
+                    capacidade: recurso.capacidade.toString(),
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(
+                    `Erro ao ${isEdicao ? "editar" : "criar"} recurso`
+                );
+            }
+
+            // Atualiza localmente com nova lista de recursos
+            const res = await fetch("/api/recursos");
+            const data = await res.json();
+            setRecursos(data.recursos);
+
+            setMostrarModalRecurso(false);
+        } catch (error) {
+            console.error(error);
+            alert("Ocorreu um erro ao salvar o recurso.");
+        }
     };
 
     return (
@@ -75,7 +129,7 @@ const Recursos = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {recursos.map((recurso, idx) => (
+                        {recursos?.map((recurso, idx) => (
                             <tr
                                 key={recurso.id}
                                 className={`transition-all ${

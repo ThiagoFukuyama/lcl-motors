@@ -1,4 +1,3 @@
-// src/components/ProdutoModal.tsx
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -20,21 +19,33 @@ const ProdutoModal = ({
     const [nome, setNome] = useState("");
     const [consumos, setConsumos] = useState<Record<number, number>>({});
     const [custoInterno, setCustoInterno] = useState(0);
+    const [lucroInterno, setLucroInterno] = useState(0);
     const [custoExterno, setCustoExterno] = useState(0);
-    const [demandaExterna, setDemandaExterna] = useState(0);
+    const [lucroExterno, setLucroExterno] = useState(0);
+    const [demandaMinimaTerceirizada, setDemandaMinimaTerceirizada] =
+        useState(0);
+    const [demandaMinimaTotal, setDemandaMinimaTotal] = useState(0);
 
     useEffect(() => {
         if (produto) {
             setNome(produto.nome || "");
             setCustoInterno(produto.custoInterno || 0);
+            setLucroInterno(produto.lucroInterno || 0);
             setCustoExterno(produto.custoExterno || 0);
-            setDemandaExterna(produto.demandaExterna || 0);
+            setLucroExterno(produto.lucroExterno || 0);
+            setDemandaMinimaTerceirizada(
+                produto.demandaMinimaTerceirizada || 0
+            );
+            setDemandaMinimaTotal(produto.demandaMinimaTotal || 0);
             setConsumos(produto.consumos || {});
         } else {
             setNome("");
             setCustoInterno(0);
+            setLucroInterno(0);
             setCustoExterno(0);
-            setDemandaExterna(0);
+            setLucroExterno(0);
+            setDemandaMinimaTerceirizada(0);
+            setDemandaMinimaTotal(0);
             setConsumos({});
         }
     }, [produto]);
@@ -44,7 +55,17 @@ const ProdutoModal = ({
     };
 
     const handleSalvar = () => {
-        onSave({ nome, consumos, custoInterno, custoExterno, demandaExterna });
+        onSave({
+            id: produto?.id, // aqui o id se existir
+            nome,
+            consumos,
+            custoInterno,
+            lucroInterno,
+            custoExterno,
+            lucroExterno,
+            demandaMinimaTerceirizada,
+            demandaMinimaTotal,
+        });
         onClose();
     };
 
@@ -78,65 +99,120 @@ const ProdutoModal = ({
                         />
                     </div>
 
-                    {recursos.map((recurso) => (
-                        <div key={recurso.id}>
+                    <div>
+                        <label className="block mb-1 font-semibold">
+                            Consumo de Recursos:
+                        </label>
+                        <div className="max-h-[200px] overflow-y-auto space-y-2 pr-1">
+                            {recursos.map((recurso) => (
+                                <div key={recurso.id}>
+                                    <label className="text-sm">
+                                        {recurso.nome}:
+                                    </label>
+                                    <input
+                                        type="number"
+                                        className="w-full mt-1 p-2 border rounded"
+                                        value={consumos[recurso.id] || ""}
+                                        onChange={(e) =>
+                                            handleChangeConsumo(
+                                                recurso.id,
+                                                Number(e.target.value)
+                                            )
+                                        }
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
                             <label className="font-medium">
-                                Consumo {recurso.nome}:
+                                Custo produção interna:
                             </label>
                             <input
                                 type="number"
                                 className="w-full mt-1 p-2 border rounded"
-                                value={consumos[recurso.id] || ""}
+                                value={custoInterno}
                                 onChange={(e) =>
-                                    handleChangeConsumo(
-                                        recurso.id,
+                                    setCustoInterno(Number(e.target.value))
+                                }
+                            />
+                        </div>
+
+                        <div>
+                            <label className="font-medium">
+                                Lucro produção interna:
+                            </label>
+                            <input
+                                type="number"
+                                className="w-full mt-1 p-2 border rounded"
+                                value={lucroInterno}
+                                onChange={(e) =>
+                                    setLucroInterno(Number(e.target.value))
+                                }
+                            />
+                        </div>
+
+                        <div>
+                            <label className="font-medium">
+                                Custo produção externa:
+                            </label>
+                            <input
+                                type="number"
+                                className="w-full mt-1 p-2 border rounded"
+                                value={custoExterno}
+                                onChange={(e) =>
+                                    setCustoExterno(Number(e.target.value))
+                                }
+                            />
+                        </div>
+
+                        <div>
+                            <label className="font-medium">
+                                Lucro produção externa:
+                            </label>
+                            <input
+                                type="number"
+                                className="w-full mt-1 p-2 border rounded"
+                                value={lucroExterno}
+                                onChange={(e) =>
+                                    setLucroExterno(Number(e.target.value))
+                                }
+                            />
+                        </div>
+
+                        <div>
+                            <label className="font-medium">
+                                Demanda mínima terceirizada:
+                            </label>
+                            <input
+                                type="number"
+                                className="w-full mt-1 p-2 border rounded"
+                                value={demandaMinimaTerceirizada}
+                                onChange={(e) =>
+                                    setDemandaMinimaTerceirizada(
                                         Number(e.target.value)
                                     )
                                 }
                             />
                         </div>
-                    ))}
 
-                    <div>
-                        <label className="font-medium">
-                            Custo produção interna:
-                        </label>
-                        <input
-                            type="number"
-                            className="w-full mt-1 p-2 border rounded"
-                            value={custoInterno}
-                            onChange={(e) =>
-                                setCustoInterno(Number(e.target.value))
-                            }
-                        />
-                    </div>
-
-                    <div>
-                        <label className="font-medium">
-                            Custo produção externa:
-                        </label>
-                        <input
-                            type="number"
-                            className="w-full mt-1 p-2 border rounded"
-                            value={custoExterno}
-                            onChange={(e) =>
-                                setCustoExterno(Number(e.target.value))
-                            }
-                        />
-                    </div>
-
-                    <div>
-                        <label className="font-medium">
-                            Demanda produção externa:
-                        </label>
-                        <input
-                            type="number"
-                            className="w-full mt-1 p-2 border rounded"
-                            value={demandaExterna}
-                            onChange={(e) =>
-                                setDemandaExterna(Number(e.target.value))
-                            }
-                        />
+                        <div>
+                            <label className="font-medium">
+                                Demanda mínima total:
+                            </label>
+                            <input
+                                type="number"
+                                className="w-full mt-1 p-2 border rounded"
+                                value={demandaMinimaTotal}
+                                onChange={(e) =>
+                                    setDemandaMinimaTotal(
+                                        Number(e.target.value)
+                                    )
+                                }
+                            />
+                        </div>
                     </div>
                 </div>
 
