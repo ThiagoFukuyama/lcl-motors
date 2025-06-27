@@ -282,13 +282,20 @@ export default function Resultado({ resultado, onVoltar }: ResultadoProps) {
                 </div>
 
                 {/* Gráfico */}
+                {/* Gráfico */}
                 <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
                     <h3 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2">
                         Gráfico Comparativo de Produção
                     </h3>
-                    <div className="h-96">
-                        <Bar data={chartData} options={chartOptions} />
-                    </div>
+                    {produtos_data.length <= 10 ? (
+                        <div className="h-96">
+                            <Bar data={chartData} options={chartOptions} />
+                        </div>
+                    ) : (
+                        <p className="text-gray-600 text-lg italic">
+                            O gráfico não está disponível para esse problema.
+                        </p>
+                    )}
                 </div>
             </div>
         </div>
